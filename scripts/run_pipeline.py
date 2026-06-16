@@ -27,6 +27,7 @@ from scripts.common import (
 )
 from scripts.cut_clips import cut_clip
 from scripts.detect_pauses import detect_pauses
+from scripts.detect_scenes import detect_scenes
 from scripts.extract_audio import extract_audio
 from scripts.export_clip_subtitles import export_clip_subtitles
 from scripts.probe_video import probe_video
@@ -64,6 +65,7 @@ def build_plan_preview(
     padding_after: float,
     output_file_prefix: str = "output/clips",
     pauses: list[dict[str, float]] | None = None,
+    scene_cuts: list[float] | None = None,
 ) -> list[dict[str, object]]:
     raw_clips = build_fallback_clips(
         transcript,
@@ -71,6 +73,7 @@ def build_plan_preview(
         target_clip_seconds=target_clip_seconds,
         max_clip_seconds=max_clip_seconds,
         pauses=pauses,
+        scene_cuts=scene_cuts,
     )
     return normalize_clips(
         raw_clips,
@@ -79,6 +82,7 @@ def build_plan_preview(
         padding_after,
         output_file_prefix=output_file_prefix,
         pauses=pauses,
+        scene_cuts=scene_cuts,
         min_clip_seconds=min_clip_seconds,
         max_clip_seconds=max_clip_seconds,
     )
@@ -193,10 +197,24 @@ def build_pause_signature(pauses_payload: dict[str, object] | None) -> str | Non
     ).hexdigest()
 
 
+def build_scene_signature(scenes_payload: dict[str, object] | None) -> str | None:
+    if scenes_payload is None:
+        return None
+    payload = {
+        "source_video": scenes_payload.get("source_video"),
+        "min_scene_len": scenes_payload.get("min_scene_len"),
+        "scene_cuts": scenes_payload.get("scene_cuts", []),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
 def build_clip_plan_context(
     probe_payload: dict[str, object],
     transcript_payload: dict[str, object],
     pauses_payload: dict[str, object] | None,
+    scenes_payload: dict[str, object] | None,
     mode: str,
 ) -> dict[str, object]:
     return {
@@ -204,6 +222,7 @@ def build_clip_plan_context(
         "mode": mode,
         "transcript_signature": build_transcript_signature(transcript_payload),
         "pause_signature": build_pause_signature(pauses_payload),
+        "scene_signature": build_scene_signature(scenes_payload),
     }
 
 
@@ -218,9 +237,11 @@ def load_or_create_clip_plan(
     mode: str,
     output_file_prefix: str,
     pauses_payload: dict[str, object] | None = None,
+    scenes_payload: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], str]:
-    context = build_clip_plan_context(probe_payload, transcript_payload, pauses_payload, mode)
+    context = build_clip_plan_context(probe_payload, transcript_payload, pauses_payload, scenes_payload, mode)
     pauses = list(pauses_payload.get("pauses", [])) if pauses_payload is not None else None
+    scene_cuts = list(scenes_payload.get("scene_cuts", [])) if scenes_payload is not None else None
     if clip_plan_json.exists() and not force:
         payload = read_json(clip_plan_json)
         clips = payload.get("clips", [])
@@ -251,6 +272,7 @@ def load_or_create_clip_plan(
             PADDING_AFTER_SECONDS,
             output_file_prefix=output_file_prefix,
             pauses=pauses,
+            scene_cuts=scene_cuts,
             min_clip_seconds=MIN_CLIP_SECONDS,
             max_clip_seconds=MAX_CLIP_SECONDS,
         )
@@ -269,6 +291,7 @@ def load_or_create_clip_plan(
             PADDING_AFTER_SECONDS,
             output_file_prefix=output_file_prefix,
             pauses=pauses,
+            scene_cuts=scene_cuts,
         )
         analysis_source = "fallback"
 
@@ -369,6 +392,11 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
             directories["metadata"] / "pauses.json",
             args.force,
         )
+        scenes_payload = detect_scenes(
+            input_path,
+            directories["metadata"] / "scenes.json",
+            args.force,
+        )
         transcript_json = directories["metadata"] / "transcript.json"
         transcript_txt = directories["metadata"] / "transcript.txt"
         transcript_srt = directories["subtitles"] / "source.srt"
@@ -407,6 +435,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
             args.mode,
             clip_output_prefix,
             pauses_payload,
+            scenes_payload,
         )
 
         if args.execute:
@@ -437,6 +466,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
         "audio_path": audio_path,
         "transcript": transcript_payload,
         "pauses": pauses_payload,
+        "scenes": scenes_payload,
         "transcript_source": transcript_source,
         "clips": clips,
         "analysis_source": analysis_source,

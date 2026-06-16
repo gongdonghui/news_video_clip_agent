@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from scripts.common import read_json, write_json
+from scripts.common import load_env_file, read_json, write_json
 from scripts.common import seconds_to_timestamp
 
-WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
+_DEFAULT_MODEL = "mlx-community/whisper-large-v3-mlx"
+
+_env_values = load_env_file(Path(__file__).resolve().parent.parent / ".env")
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL") or _env_values.get("WHISPER_MODEL") or _DEFAULT_MODEL
 
 
 def build_transcript_payload(

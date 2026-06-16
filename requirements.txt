@@ -1,0 +1,4 @@
+mlx-whisper>=0.4
+openai>=2.0
+scenedetect>=0.6
+pytest>=8.0

@@ -1,79 +1,80 @@
 # news_video_clip_agent
 
-一个面向新闻长视频拆条的本地剪辑项目。
+A local video clipping pipeline for segmenting long-form news videos into shorter, focused clips.
 
-项目目标不是做通用 NLE，而是把一条 20 到 30 分钟左右的新闻节目，自动拆成一组更短、更集中、可单独分发的视频片段，并同时产出字幕和结构化元数据。
+The goal is not a general-purpose NLE, but to automatically break a ~20-30 minute news program into a set of shorter, self-contained, distributable clips, along with subtitles and structured metadata.
 
-## 主要功能
+## Key Features
 
-- 读取本地视频并提取元数据
-- 提取单声道 16kHz WAV 音频
-- 使用本地 `mlx_whisper` 生成带时间戳转录
-- 优先使用 `DeepSeek` 做新闻语义拆条
-- 在语义边界附近结合语音停顿修正 clip 结尾
-- 回退到本地启发式分组，保证没有 LLM 也能出方案
-- 导出 `clip_plan.json`、`clip_plan.csv`、`clip_plan.md`
-- 执行 FFmpeg 精确剪辑
-- 为每个 clip 导出独立 `srt` / `vtt`
-- 为每个输入视频使用独立输出目录，避免不同视频互相覆盖
-- 对同一输入加运行锁，避免并发跑乱产物
+- Read local video and extract metadata via ffprobe
+- Extract mono 16kHz WAV audio
+- Generate timestamped transcription using local `mlx_whisper`
+- Prioritize DeepSeek for semantic news clip segmentation
+- Snap clip boundaries to natural speech pauses near semantic edges
+- Fall back to local heuristic grouping when no LLM is available
+- Export `clip_plan.json`, `clip_plan.csv`, `clip_plan.md`
+- Execute FFmpeg accurate-encode clips
+- Export per-clip `.srt` / `.vtt` subtitles
+- Isolated output directory per input video to avoid cross-contamination
+- PID-based pipeline lock prevents concurrent runs on the same input
 
-## 当前实现的剪辑策略
+## Current Clipping Strategy
 
-当前项目最适合 `news` 模式，核心策略是：
+The project is optimized for `news` mode. Core strategy:
 
-1. 先转录，不直接按镜头切  
-   入口在 [scripts/transcribe.py](/Users/gongshuai/workspace/english-video-clip/scripts/transcribe.py:1)。当前实现使用本地 `mlx_whisper`，把整条视频转成带时间戳的 transcript。
+1. **Transcribe first, don't cut by shot**  
+   Entry point: [scripts/transcribe.py](scripts/transcribe.py:1). Uses local `mlx_whisper` to produce a timestamped transcript of the full video.
 
-2. 优先用 DeepSeek 做语义选段  
-   入口在 [scripts/analyze_clips.py](/Users/gongshuai/workspace/english-video-clip/scripts/analyze_clips.py:1)。  
-   当前 prompt 重点是：
-   - 英文新闻
-   - 目标片长 `15-45s`
-   - 优先主播主导片段
-   - 允许很短的记者/采访延续
-   - 偏好更紧、更短的 clips，而不是长 package
+2. **DeepSeek semantic clip selection (preferred)**  
+   Entry point: [scripts/analyze_clips.py](scripts/analyze_clips.py:1).  
+   Prompt focuses on:
+   - English news
+   - Target duration `15-45s`
+   - Prefer broadcaster-led clips centered on the anchor
+   - Allow brief reporter/soundbite continuation
+   - Favor tighter, shorter clips over long packages
 
-3. DeepSeek 失败时回退到本地启发式分组  
-   逻辑在 [scripts/build_clip_plan.py](/Users/gongshuai/workspace/english-video-clip/scripts/build_clip_plan.py:1)。  
-   fallback 不是按镜头切，而是按 transcript 段、时长阈值和间隔做分组。
+3. **Fall back to local heuristic grouping when DeepSeek fails**  
+   Logic in [scripts/build_clip_plan.py](scripts/build_clip_plan.py:1).  
+   Groups transcript segments by duration thresholds and inter-segment gaps, not by shot boundaries.
 
-4. 用停顿检测修正边界  
-   逻辑在 [scripts/detect_pauses.py](/Users/gongshuai/workspace/english-video-clip/scripts/detect_pauses.py:1)。  
-   项目会调用 `ffmpeg silencedetect` 识别语音停顿，并把 clip end 吸附到更自然的停顿附近，尽量避免在主播一句话中间收尾。
+4. **Pause-aware boundary snapping**  
+   Logic in [scripts/detect_pauses.py](scripts/detect_pauses.py:1).  
+   Uses `ffmpeg silencedetect` to find speech pauses and snaps clip endpoints to natural silence, avoiding cuts mid-sentence.
 
-5. 最后做统一 padding 和导出  
-   在 [scripts/run_pipeline.py](/Users/gongshuai/workspace/english-video-clip/scripts/run_pipeline.py:1) 里统一做：
-   - 前补 `0.5s`
-   - 后补 `1.0s`
-   - 输出 clip、字幕和 plan
+5. **Uniform padding and export**  
+   Orchestrated in [scripts/run_pipeline.py](scripts/run_pipeline.py:1):
+   - Add `0.5s` padding before clip start
+   - Add `1.0s` padding after clip end
+   - Output clips, subtitles, and clip plan artifacts
 
-## 适合的内容类型
+## Suitable Content
 
-- 英文电视新闻
-- 主播串联 + 记者 package 的晚间新闻
-- 需要快速拆成多个短视频的资讯类节目
+- English TV news broadcasts
+- Anchor-led evening news with reporter packages
+- Current-affairs programs needing fast clip extraction
 
-不太适合：
+Less suitable:
 
-- 纯访谈长对话
-- 课程录播
-- 强依赖镜头语言的纪录片
-- 需要按镜头、人物或情绪做精细剪辑的内容
+- Long-form interview conversations
+- Lecture recordings
+- Documentaries relying heavily on visual language
+- Content requiring shot-level, character-level, or emotion-driven fine editing
 
-## 技术栈
+## Tech Stack
 
 - Python 3.11+
 - FFmpeg / ffprobe
 - `mlx_whisper`
 - DeepSeek Chat Completions API
 
-## 项目结构
+## Project Structure
 
 ```text
 news_video_clip_agent/
 ├── README.md
 ├── AGENTS.md
+├── .env
 ├── docs/
 ├── scripts/
 │   ├── analyze_clips.py
@@ -91,14 +92,26 @@ news_video_clip_agent/
 └── output/
 ```
 
-说明：
+- `temp/` — intermediate artifacts, not committed by default
+- `output/<run_id>/` — per-input-video output directory
 
-- `temp/` 是中间产物目录，默认不提交
-- `output/<run_id>/` 是每个输入视频对应的独立输出目录
+## Configuration
 
-## 依赖准备
+Set environment variables in `.env` or export them in your shell:
 
-先确认本地环境：
+```bash
+# Required for DeepSeek semantic analysis (falls back to heuristic if missing)
+DEEPSEEK_API_KEY=your_key
+
+# Optional overrides
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+WHISPER_MODEL=mlx-community/whisper-large-v3-mlx
+```
+
+## Setup
+
+Verify your local environment:
 
 ```bash
 ffmpeg -version
@@ -106,17 +119,9 @@ ffprobe -version
 python3 --version
 ```
 
-如果需要 DeepSeek 语义拆条，准备环境变量：
+## Usage
 
-```bash
-export DEEPSEEK_API_KEY=your_key
-```
-
-如果没有这个变量，项目仍然可以运行，但会直接走本地 fallback 分组。
-
-## 常用命令
-
-只生成剪辑方案：
+Generate clip plan only (no cuts):
 
 ```bash
 python3 scripts/run_pipeline.py \
@@ -126,7 +131,7 @@ python3 scripts/run_pipeline.py \
   --plan-only
 ```
 
-生成方案并实际剪辑：
+Generate plan and execute cuts:
 
 ```bash
 python3 scripts/run_pipeline.py \
@@ -136,7 +141,7 @@ python3 scripts/run_pipeline.py \
   --execute
 ```
 
-强制重跑中间产物：
+Force rebuild all intermediate artifacts:
 
 ```bash
 python3 scripts/run_pipeline.py \
@@ -147,9 +152,9 @@ python3 scripts/run_pipeline.py \
   --force
 ```
 
-## 输出内容
+## Output
 
-每次运行会生成一个独立目录：
+Each run produces an isolated directory:
 
 ```text
 output/<run_id>/
@@ -159,28 +164,19 @@ output/<run_id>/
 └── logs/
 ```
 
-其中：
+Contents:
 
-- `metadata/source_probe.json`
-  - 视频元数据
-- `metadata/transcript.json`
-  - 带时间戳转录
-- `metadata/pauses.json`
-  - 停顿检测结果
-- `metadata/clip_plan.json`
-  - 结构化剪辑方案
-- `metadata/clip_plan.csv`
-  - 表格版剪辑方案
-- `metadata/clip_plan.md`
-  - 人工可读方案
-- `subtitles/source.srt` / `source.vtt`
-  - 整条视频字幕
-- `subtitles/<clip_id>.srt` / `<clip_id>.vtt`
-  - 每个 clip 的相对时间字幕
-- `clips/<clip_id>.mp4`
-  - 实际导出的视频片段
+- `metadata/source_probe.json` — video metadata
+- `metadata/transcript.json` — timestamped transcription
+- `metadata/pauses.json` — silence detection results
+- `metadata/clip_plan.json` — structured clip plan
+- `metadata/clip_plan.csv` — tabular clip plan
+- `metadata/clip_plan.md` — human-readable clip plan
+- `subtitles/source.srt` / `source.vtt` — full-video subtitles
+- `subtitles/<clip_id>.srt` / `<clip_id>.vtt` — per-clip relative-time subtitles
+- `clips/<clip_id>.mp4` — exported video clips
 
-## 一个典型的数据流
+## Data Flow
 
 ```text
 source video
@@ -196,31 +192,31 @@ source video
   -> clip subtitles
 ```
 
-## 当前策略的优点
+## Current Strategy Strengths
 
-- 对新闻节目很实用，尤其是主播串联结构明显的素材
-- 本地转录，不依赖 Whisper 云 API
-- 有停顿感知，边界比纯 transcript 分组自然
-- DeepSeek 失败时不会整条流程中断
-- 可复用 transcript、pause 和 clip plan，重跑成本低
+- Practical for news programs, especially anchor-centric structures
+- Local transcription — no Whisper cloud API dependency
+- Pause-aware boundaries feel more natural than pure transcript grouping
+- DeepSeek failures don't halt the pipeline
+- Reusable transcript, pause, and clip plan artifacts keep re-run costs low
 
-## 当前策略的局限
+## Current Limitations
 
-- 不是按镜头切，没有接 `PySceneDetect`
-- 没有人物 diarization，分不出主播、记者、采访对象的正式角色标签
-- DeepSeek 和 fallback 是两套风格，clip 数量可能差很多
-- 没有 clip budget 约束，同样 20 多分钟新闻，可能切成 10 几段，也可能切成 30 多段
-- `DeepSeek` 返回结果目前只做基础校验，没有强力的后处理合并策略
+- No shot-cut detection via `PySceneDetect`
+- No speaker diarization — can't label anchor vs. reporter vs. interviewee
+- DeepSeek and fallback produce different clip distributions
+- No clip budget constraint — a ~20 min news segment may yield 10 or 30+ clips
+- DeepSeek responses get basic validation only, no aggressive post-pass merging
 
-## 测试
+## Tests
 
-运行全部测试：
+Run all tests:
 
 ```bash
 pytest -q
 ```
 
-常用聚焦测试：
+Focused test runs:
 
 ```bash
 pytest tests/test_analyze_clips.py -q
@@ -228,11 +224,11 @@ pytest tests/test_build_clip_plan.py -q
 pytest tests/test_run_pipeline.py -q
 ```
 
-## 后续可增强方向
+## Future Directions
 
-- 加入 `clip budget`，按节目总时长控制目标片段数
-- 增加 post-pass merge，合并过碎的连续片段
-- 接入 `PySceneDetect` 做镜头边界辅助
-- 加入 speaker diarization，真正区分主播 / 记者 / 采访对象
-- 增加缩略图和字幕烧录
-- 支持更多视频类型，而不只偏新闻
+- Add `clip budget` to constrain target clip count by total duration
+- Post-pass merging for overly fragmented adjacent clips
+- Integrate `PySceneDetect` for shot-boundary assistance
+- Add speaker diarization to distinguish anchor / reporter / interviewee
+- Generate thumbnails and burned-in subtitles
+- Support additional video genres beyond news

@@ -262,3 +262,105 @@ def test_build_fallback_clips_waits_for_nearby_pause_before_flushing():
     assert len(clips) == 1
     assert clips[0]["start"] == 0.0
     assert clips[0]["end"] == 42.6
+
+
+def test_normalize_clips_snaps_end_to_nearest_boundary_scene_cut_beats_pause():
+    clips = normalize_clips(
+        [
+            {
+                "clip_id": "clip_001",
+                "title": "Lead",
+                "start": 10.0,
+                "end": 40.5,
+                "summary": "Lead.",
+                "keywords": ["lead"],
+                "reason": "Complete.",
+                "confidence": 0.9,
+            }
+        ],
+        duration_seconds=120.0,
+        padding_before=0.0,
+        padding_after=0.0,
+        pauses=[{"start": 39.2, "end": 39.8, "duration": 0.6}],
+        scene_cuts=[39.8],
+        min_clip_seconds=15,
+        max_clip_seconds=45,
+    )
+
+    assert clips[0]["end"] == "00:00:39.800"
+    assert clips[0]["duration_seconds"] == 29.8
+
+
+def test_normalize_clips_falls_back_to_scene_cut_when_no_pause_nearby():
+    clips = normalize_clips(
+        [
+            {
+                "clip_id": "clip_001",
+                "title": "Lead",
+                "start": 10.0,
+                "end": 40.5,
+                "summary": "Lead.",
+                "keywords": ["lead"],
+                "reason": "Complete.",
+                "confidence": 0.9,
+            }
+        ],
+        duration_seconds=120.0,
+        padding_before=0.0,
+        padding_after=0.0,
+        pauses=None,
+        scene_cuts=[39.8],
+        min_clip_seconds=15,
+        max_clip_seconds=45,
+    )
+
+    assert clips[0]["end"] == "00:00:39.800"
+    assert clips[0]["duration_seconds"] == 29.8
+
+
+def test_normalize_clips_keeps_original_end_when_no_pauses_or_scenes():
+    clips = normalize_clips(
+        [
+            {
+                "clip_id": "clip_001",
+                "title": "Lead",
+                "start": 10.0,
+                "end": 40.5,
+                "summary": "Lead.",
+                "keywords": ["lead"],
+                "reason": "Complete.",
+                "confidence": 0.9,
+            }
+        ],
+        duration_seconds=120.0,
+        padding_before=0.0,
+        padding_after=0.0,
+        pauses=None,
+        scene_cuts=None,
+        min_clip_seconds=15,
+        max_clip_seconds=45,
+    )
+
+    assert clips[0]["end"] == "00:00:40.500"
+
+
+def test_build_fallback_clips_uses_scene_cuts_to_flush():
+    transcript = {
+        "segments": [
+            {"id": 1, "start": 0.0, "end": 16.0, "text": "Anchor introduces the breaking story."},
+            {"id": 2, "start": 16.1, "end": 31.0, "text": "Anchor adds the key confirmed detail."},
+            {"id": 3, "start": 31.1, "end": 43.0, "text": "Anchor closes with the immediate takeaway."},
+        ]
+    }
+
+    clips = build_fallback_clips(
+        transcript,
+        min_clip_seconds=15,
+        target_clip_seconds=30,
+        max_clip_seconds=45,
+        scene_cuts=[42.6],
+    )
+
+    assert len(clips) == 1
+    assert clips[0]["start"] == 0.0
+    assert clips[0]["end"] == 42.6

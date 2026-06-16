@@ -157,12 +157,21 @@ def test_run_pipeline_plan_only_writes_artifacts_and_falls_back_when_analysis_fa
         output_path.write_text(json.dumps(pause_payload), encoding="utf-8")
         return pause_payload
 
+    def fake_detect_scenes(source_video: Path, output_path: Path, force: bool, **_kwargs) -> dict[str, object]:
+        assert source_video == input_path
+        assert force is False
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        scene_payload = {"source_video": str(source_video), "min_scene_len": 3.0, "scene_cuts": [10.0, 30.0]}
+        output_path.write_text(json.dumps(scene_payload), encoding="utf-8")
+        return scene_payload
+
     monkeypatch.setattr("scripts.run_pipeline.get_project_root", lambda: tmp_path)
     monkeypatch.setattr("scripts.run_pipeline.probe_video", fake_probe_video)
     monkeypatch.setattr("scripts.run_pipeline.extract_audio", fake_extract_audio)
     monkeypatch.setattr("scripts.run_pipeline.transcribe_audio", fake_transcribe_audio)
     monkeypatch.setattr("scripts.run_pipeline.request_clip_analysis", fake_request_clip_analysis)
     monkeypatch.setattr("scripts.run_pipeline.detect_pauses", fake_detect_pauses)
+    monkeypatch.setattr("scripts.run_pipeline.detect_scenes", fake_detect_scenes)
 
     from scripts.run_pipeline import run_pipeline
 
@@ -252,6 +261,14 @@ def test_run_pipeline_execute_cuts_clips_and_exports_subtitles(
             "noise_threshold_db": -35,
             "min_silence_seconds": 0.45,
             "pauses": [],
+        },
+    )
+    monkeypatch.setattr(
+        "scripts.run_pipeline.detect_scenes",
+        lambda source_video, output_path, force, **_kwargs: {
+            "source_video": str(source_video),
+            "min_scene_len": 3.0,
+            "scene_cuts": [],
         },
     )
     monkeypatch.setattr(
@@ -358,6 +375,14 @@ def test_run_pipeline_discards_transcript_for_video_only_source(
         },
     )
     monkeypatch.setattr(
+        "scripts.run_pipeline.detect_scenes",
+        lambda source_video, output_path, force, **_kwargs: {
+            "source_video": str(source_video),
+            "min_scene_len": 3.0,
+            "scene_cuts": [],
+        },
+    )
+    monkeypatch.setattr(
         "scripts.run_pipeline.transcribe_audio",
         lambda *_args, **_kwargs: transcript_payload,
     )
@@ -424,6 +449,14 @@ def test_run_pipeline_no_audio_path_skips_transcription_and_reuses_empty_artifac
             "noise_threshold_db": -35,
             "min_silence_seconds": 0.45,
             "pauses": [],
+        },
+    )
+    monkeypatch.setattr(
+        "scripts.run_pipeline.detect_scenes",
+        lambda source_video, output_path, force, **_kwargs: {
+            "source_video": str(source_video),
+            "min_scene_len": 3.0,
+            "scene_cuts": [],
         },
     )
 
@@ -555,6 +588,14 @@ def test_run_pipeline_uses_input_specific_artifact_paths(
             "pauses": [],
         },
     )
+    monkeypatch.setattr(
+        "scripts.run_pipeline.detect_scenes",
+        lambda source_video, output_path, force, **_kwargs: {
+            "source_video": str(source_video),
+            "min_scene_len": 3.0,
+            "scene_cuts": [],
+        },
+    )
     monkeypatch.setattr("scripts.run_pipeline.transcribe_audio", fake_transcribe_audio)
     monkeypatch.setattr(
         "scripts.run_pipeline.request_clip_analysis",
@@ -670,6 +711,7 @@ def test_load_or_create_clip_plan_reuses_only_matching_context(
                     probe_payload,
                     transcript_payload,
                     pauses_payload,
+                    None,
                     "news",
                 ),
                 "clips": expected_clips,
@@ -694,6 +736,7 @@ def test_load_or_create_clip_plan_reuses_only_matching_context(
         "news",
         "output/example-run/clips",
         pauses_payload,
+        None,
     )
 
     assert source == "reused"
@@ -773,6 +816,7 @@ def test_load_or_create_clip_plan_recomputes_when_context_changes(
         "news",
         "output/example-run/clips",
         pauses_payload,
+        None,
     )
 
     assert source == "deepseek"
@@ -824,6 +868,7 @@ def test_load_or_create_clip_plan_recomputes_when_pause_signature_changes(
                     probe_payload,
                     transcript_payload,
                     old_pauses_payload,
+                    None,
                     "news",
                 ),
                 "clips": [],
@@ -860,6 +905,7 @@ def test_load_or_create_clip_plan_recomputes_when_pause_signature_changes(
         "news",
         "output/example-run/clips",
         new_pauses_payload,
+        None,
     )
 
     assert source == "deepseek"

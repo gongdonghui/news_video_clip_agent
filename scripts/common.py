@@ -53,7 +53,7 @@ def load_runtime_env(project_root: Path | None = None) -> dict[str, str]:
     root = project_root or PROJECT_ROOT
     values = load_env_file(root / ".env")
     for key, value in os.environ.items():
-        if key.startswith("DEEPSEEK_"):
+        if key.startswith("DEEPSEEK_") or key.startswith("WHISPER_"):
             values[key] = value
     return values
 

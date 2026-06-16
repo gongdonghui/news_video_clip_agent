@@ -17,29 +17,33 @@ def clamp_clip_end(
     return min(end, start + float(max_clip_seconds))
 
 
-def find_pause_boundary(
+def find_nearest_boundary(
     start: float,
     end: float,
     pauses: list[dict[str, float]] | None,
+    scene_cuts: list[float] | None,
     min_clip_seconds: float,
     max_clip_seconds: float | None,
 ) -> float | None:
-    if not pauses:
-        return None
-
     capped_end = clamp_clip_end(start, end, max_clip_seconds)
     earliest_end = start + float(min_clip_seconds)
     before_candidates: list[float] = []
     after_candidates: list[float] = []
 
-    for pause in pauses:
-        pause_start = float(pause["start"])
-        if pause_start < earliest_end:
-            continue
-        if capped_end - PAUSE_LOOKBACK_SECONDS <= pause_start <= capped_end:
-            before_candidates.append(pause_start)
-        elif capped_end < pause_start <= capped_end + PAUSE_LOOKAHEAD_SECONDS:
-            after_candidates.append(pause_start)
+    def _collect_candidates(boundary_time: float) -> None:
+        if boundary_time < earliest_end:
+            return
+        if capped_end - PAUSE_LOOKBACK_SECONDS <= boundary_time <= capped_end:
+            before_candidates.append(boundary_time)
+        elif capped_end < boundary_time <= capped_end + PAUSE_LOOKAHEAD_SECONDS:
+            after_candidates.append(boundary_time)
+
+    if pauses:
+        for pause in pauses:
+            _collect_candidates(float(pause["start"]))
+    if scene_cuts:
+        for cut in scene_cuts:
+            _collect_candidates(cut)
 
     if before_candidates:
         return max(before_candidates)
@@ -52,38 +56,42 @@ def snap_clip_end(
     start: float,
     end: float,
     pauses: list[dict[str, float]] | None,
+    scene_cuts: list[float] | None,
     min_clip_seconds: float,
     max_clip_seconds: float | None,
 ) -> float:
     capped_end = clamp_clip_end(start, end, max_clip_seconds)
-    pause_boundary = find_pause_boundary(
+    boundary = find_nearest_boundary(
         start,
         capped_end,
         pauses,
+        scene_cuts,
         min_clip_seconds,
         max_clip_seconds,
     )
-    if pause_boundary is None:
+    if boundary is None:
         return capped_end
-    if pause_boundary - start < float(min_clip_seconds):
+    if boundary - start < float(min_clip_seconds):
         return capped_end
-    return pause_boundary
+    return boundary
 
 
 def can_flush_at_end(
     start: float,
     end: float,
     pauses: list[dict[str, float]] | None,
+    scene_cuts: list[float] | None,
     min_clip_seconds: float,
     max_clip_seconds: float,
 ) -> bool:
-    if not pauses:
+    if not pauses and not scene_cuts:
         return True
     return (
-        find_pause_boundary(
+        find_nearest_boundary(
             start,
             end,
             pauses,
+            scene_cuts,
             min_clip_seconds,
             max_clip_seconds,
         )
@@ -98,6 +106,7 @@ def normalize_clips(
     padding_after: float,
     output_file_prefix: str = "output/clips",
     pauses: list[dict[str, float]] | None = None,
+    scene_cuts: list[float] | None = None,
     min_clip_seconds: float = 0.0,
     max_clip_seconds: float | None = None,
 ) -> list[dict[str, object]]:
@@ -111,6 +120,7 @@ def normalize_clips(
             raw_start,
             raw_end,
             pauses,
+            scene_cuts,
             min_clip_seconds,
             max_clip_seconds,
         )
@@ -151,6 +161,7 @@ def build_fallback_clips(
     target_clip_seconds: int,
     max_clip_seconds: int,
     pauses: list[dict[str, float]] | None = None,
+    scene_cuts: list[float] | None = None,
 ) -> list[dict[str, object]]:
     clips: list[dict[str, object]] = []
     current: list[dict[str, object]] = []
@@ -164,6 +175,7 @@ def build_fallback_clips(
             clip_start,
             float(current[-1]["end"]),
             pauses,
+            scene_cuts,
             min_clip_seconds,
             max_clip_seconds,
         )
@@ -193,6 +205,7 @@ def build_fallback_clips(
                     float(current[0]["start"]),
                     float(current[-1]["end"]),
                     pauses,
+                    scene_cuts,
                     min_clip_seconds,
                     max_clip_seconds,
                 )
@@ -210,6 +223,7 @@ def build_fallback_clips(
             start,
             end,
             pauses,
+            scene_cuts,
             min_clip_seconds,
             max_clip_seconds,
         ):
